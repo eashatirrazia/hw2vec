@@ -11,9 +11,11 @@ import yaml, os, sys
 sys.path.append(os.path.dirname(sys.path[0]))
 from pathlib import Path
 from argparse import ArgumentParser
+import random
 
 class Config:
     def __init__(self, args):
+        num = random.randint(1,1000000)
         ap = ArgumentParser(description='The parameters for general arguments.')
         ap.add_argument('--yaml_path', type=str, default="./example_gnn4tj.yaml", help="The path of yaml config file.")
         ap.add_argument('--raw_dataset_path', type=str, default="../../assets/data/TJ-RTL-toy/", help="The path to raw dataset for parsing.")
@@ -21,6 +23,8 @@ class Config:
         ap.add_argument('--model_path', type=str, default="", help="Pretrained IP model ../assets/pretrained_ip_model/, Pretrained TJ model ../assets/pretrained_tj_model/")
         ap.add_argument('--graph_type', type=str, default="DFG", help="The graph type to retrieve for inspection or training/evaluating.")
         ap.add_argument('--device',    type=str, default="cpu", help="The device for training/evaluating.")
+        ap.add_argument('--model_save_path', type=str, default="trained_models", help="Save the trained model in this path by creating a .pth and .cfg file")
+        ap.add_argument('--model_name', type=str, help="Name of the model, used to save the model", required=True)
         args_parsed = ap.parse_args(args)
         for arg_name in vars(args_parsed):
             self.__dict__[arg_name] = getattr(args_parsed, arg_name)

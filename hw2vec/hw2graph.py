@@ -24,8 +24,17 @@ from pyverilog.controlflow.controlflow_analyzer import VerilogControlflowAnalyze
 from pyverilog.vparser.parser import parse
 from sklearn.model_selection import train_test_split
 from glob import glob
-from hw2vec.graph2vec.trainers import *
-from hw2vec.utilities import *
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename='test.log', level=logging.INFO)
+
+
+# from hw2vec.graph2vec.trainers import *
+# from hw2vec.utilities import *
+
+from hw2vec.hw2vec.graph2vec.trainers import *
+from hw2vec.hw2vec.utilities import *
+
 from torch_geometric.utils.convert import from_networkx
 from time import time
 
@@ -141,13 +150,25 @@ class DataProcessor:
                 else:
                     sim_diff_label.append(-1)
 
-        return train_test_split(dataset, train_size = int(len(dataset) * ratio), shuffle = True, stratify=sim_diff_label, random_state=seed)
+        return train_test_split(dataset, train_size = ratio, shuffle = True, stratify=sim_diff_label, random_state=seed)
 
-    def get_class_weights(self, train_graphs):
-        training_labels = [data.label for data in train_graphs]
-        class_weights = torch.from_numpy(compute_class_weight('balanced', np.unique(training_labels), training_labels))
+    # def get_class_weights(self, train_graphs):
+    #     training_labels = [data.label for data in train_graphs]
+    #     class_weights = torch.from_numpy(compute_class_weight('balanced', np.unique(training_labels), training_labels))
 
-        return class_weights
+    #     return class_weights
+    def get_class_weights(self,train_graphs):
+        # Extract training labels from train_graphs
+        training_labels = [graph.label for graph in train_graphs]
+        
+        # Ensure training_labels is a numpy array
+        training_labels = np.array(training_labels)
+        
+        # Compute class weights
+        classes = np.unique(training_labels)
+        class_weights = compute_class_weight(class_weight='balanced', classes=classes, y=training_labels)
+        
+        return torch.from_numpy(class_weights)
 
     def cache_graph_data(self, data_pkl_path):
         with open(data_pkl_path, 'wb+') as f:
@@ -181,8 +202,7 @@ class DFGGenerator:
         resolved_terms = dataflow_optimizer.getResolvedTerms()
         resolved_binddict = dataflow_optimizer.getResolvedBinddict()
         constlist = dataflow_optimizer.getConstlist()
-        dfg_graph_generator = VerilogGraphGenerator("top", terms, binddict, resolved_terms, 
-                                                    resolved_binddict, constlist, './seperate_modules.pdf')
+        dfg_graph_generator = VerilogGraphGenerator("top", terms, binddict, resolved_terms, resolved_binddict, constlist, './seperate_modules.pdf')
 
         # binddict with string keys
         signals = [str(bind) for bind in dfg_graph_generator.binddict]
@@ -206,7 +226,7 @@ class DFGGenerator:
                 for parent in parents:
                     dfg_graph_generator.graph.add_edge(parent, label_to_node[label.replace('_', '.')])
 
-        
+
         nx_graph = nx.DiGraph()
         
         for node in dfg_graph_generator.graph.nodes():
@@ -431,7 +451,7 @@ class HW2GRAPH:
 
         with open(hw_path,'r') as file_in:
             lines = file_in.read().split("\n")
-    
+        
         modules_dic={}
         for line in lines:
             words = line.split()
@@ -452,14 +472,64 @@ class HW2GRAPH:
                 if word in modules_dic.keys():
                     modules_dic[word] += 1
     
-        for m in modules_dic:
+        # for m in modules_dic:
+        #     if modules_dic[m] == 1:
+        #         top_module = m
+        #         break
+
+        for m in modules_dic.keys():
+            # logger.info(f"{m} found")
             if modules_dic[m] == 1:
+                logger.info(f"{m} exists only once")
                 top_module = m
                 break
 
+
         with open(hw_path, "w") as file_out:
             for line in lines:
-                file_out.write(line.replace(top_module, 'top')+'\n')        
+                file_out.write(line.replace(top_module, 'top')+'\n')   
+
+    # def rename_topModule(self, hw_path):
+    #     #TODO; right now this part is a rule-based method, we will consider using AST to parse the flattened code in the future.
+
+    #     with open(hw_path,'r') as file_in:
+    #         lines = file_in.read().split("\n")
+        
+    #     # module top()
+    #     # module top ()
+
+    #     modules_dic={}
+    #     for line in lines:
+    #         words = line.split()
+    #         for word_idx, word in enumerate(words):
+    #             if word == 'module':
+    #                 module_name = words[word_idx+1]
+    #                 if '(' in module_name:
+    #                     idx = module_name.find('(')
+    #                     module_name = module_name[:idx]
+
+    #                 try:
+    #                     modules_dic[module_name] += 1
+    #                 except:
+    #                     modules_dic[module_name] = 1
+
+                    
+    #     # for line in lines:
+    #     #     words = line.split()
+    #     #     for word in words:
+    #     #         if word in modules_dic.keys():
+    #     #             modules_dic[word] += 1
+    
+    #     for m in modules_dic.keys():
+    #         logger.info(f"{m} found")
+    #         if modules_dic[m] == 1:
+    #             logger.info(f"{m} exists only once")
+    #             top_module = m
+    #             # break
+
+    #     with open(hw_path, "w") as file_out:
+    #         for line in lines:
+    #             file_out.write(line.replace(top_module, 'top')+'\n')        
 
     def code2graph(self, verilog_dir, profile=True):
         if profile:

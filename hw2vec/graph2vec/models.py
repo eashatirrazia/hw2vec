@@ -14,8 +14,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.nn import Linear, ReLU
-from torch_geometric.nn import GCNConv, GINConv, SAGPooling, TopKPooling
+from torch_geometric.nn import GCNConv, GINConv, SAGPooling, TopKPooling, AGNNConv, TransformerConv
 from torch_geometric.nn import global_add_pool, global_mean_pool, global_max_pool
+
+# class GRAPH_CONV(nn.Module):
+#     def __init__(self, type, in_channels, out_channels):
+#         super(GRAPH_CONV, self).__init__()
+#         self.type = type
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         if type == "gcn":
+#             self.graph_conv = GCNConv(in_channels, out_channels)
+#         elif type == "gin":
+#             raise Exception("Layer not supperted")
+#         elif type == "agnn":
+#             raise Exception("Layer not supperted")
+#         else:
+#             raise Exception("Layer not supperted")
+
+
+#     def forward(self, x, edge_index):
+#         return self.graph_conv(x, edge_index)
 
 class GRAPH_CONV(nn.Module):
     def __init__(self, type, in_channels, out_channels):
@@ -25,9 +44,21 @@ class GRAPH_CONV(nn.Module):
         self.out_channels = out_channels
         if type == "gcn":
             self.graph_conv = GCNConv(in_channels, out_channels)
+        elif type == "gin":
+            self.graph_conv = GINConv(Linear(in_channels, out_channels), train_eps=True)
+        elif type == "agnn":
+            # Fix: AGNNConv only takes a single channels parameter
+            # It's a propagation layer that doesn't change feature dimensions
+            self.lin = Linear(in_channels, out_channels)
+            self.graph_conv = AGNNConv(requires_grad=True)
 
     def forward(self, x, edge_index):
-        return self.graph_conv(x, edge_index)
+        if self.type == "agnn":
+            # Transform features first, then apply AGNN
+            x = self.lin(x)
+            return self.graph_conv(x, edge_index)
+        else:
+            return self.graph_conv(x, edge_index)
 
 class GRAPH_POOL(nn.Module):
     def __init__(self, type, in_channels, poolratio):
@@ -85,6 +116,26 @@ class GRAPH2VEC(nn.Module):
             json.dump(model_configurations, f)
         torch.save(self.state_dict(), model_weight_path)
 
+    # def load_model(self, model_config_path, model_weight_path):
+    #     with open(model_config_path) as f:
+    #         model_configuration = json.load(f)
+        
+    #     convs = [] 
+    #     for setting in model_configuration['convs']:
+    #         graph_conv_type, in_channels, out_channels = setting
+    #         convs.append(GRAPH_CONV(graph_conv_type, int(in_channels), int(out_channels)))
+    #     self.set_graph_conv(convs)
+
+    #     pool_type, pool_in_channels, pool_ratio = model_configuration['pool']
+    #     self.set_graph_pool(GRAPH_POOL(pool_type, pool_in_channels, pool_ratio))
+
+    #     self.set_graph_readout(GRAPH_READOUT(model_configuration['readout']))
+    #     fc_in_channel, fc_out_channel = model_configuration['fc']
+    #     self.set_output_layer(nn.Linear(fc_in_channel, fc_out_channel))
+
+    #     self.load_state_dict(torch.load(model_weight_path))
+
+
     def load_model(self, model_config_path, model_weight_path):
         with open(model_config_path) as f:
             model_configuration = json.load(f)
@@ -92,17 +143,62 @@ class GRAPH2VEC(nn.Module):
         convs = [] 
         for setting in model_configuration['convs']:
             graph_conv_type, in_channels, out_channels = setting
+            # print(graph_conv_type, in_channels, out_channels)
             convs.append(GRAPH_CONV(graph_conv_type, int(in_channels), int(out_channels)))
         self.set_graph_conv(convs)
 
         pool_type, pool_in_channels, pool_ratio = model_configuration['pool']
+        # print(pool_type, pool_in_channels, pool_ratio)
         self.set_graph_pool(GRAPH_POOL(pool_type, pool_in_channels, pool_ratio))
 
         self.set_graph_readout(GRAPH_READOUT(model_configuration['readout']))
         fc_in_channel, fc_out_channel = model_configuration['fc']
+        # print(fc_in_channel, fc_out_channel)
         self.set_output_layer(nn.Linear(fc_in_channel, fc_out_channel))
 
-        self.load_state_dict(torch.load(model_weight_path))
+        state_dict = torch.load(model_weight_path)
+        new_state_dict = {}
+
+        # Create a mapping from the old key names in the pre-trained model to the new key names in the architecture
+        for key, value in state_dict.items():
+            new_key = key
+            
+            # Modify keys for graph convolution layers
+            if 'graph_conv.weight' in key:
+                new_key = key.replace('graph_conv.weight', 'graph_conv.lin.weight')
+            elif 'graph_conv.bias' in key:
+                new_key = key.replace('graph_conv.bias', 'graph_conv.lin.bias')
+            
+            # Modify keys for pooling layers (if applicable)
+            elif 'pool1.graph_pool.gnn.lin_l.weight' in key:
+                new_key = key.replace('lin_l.weight', 'select.weight')
+            elif 'pool1.graph_pool.gnn.lin_l.bias' in key:
+                new_key = key.replace('lin_l.bias', 'select.bias')
+            elif 'pool1.graph_pool.gnn.lin_r.weight' in key:
+                new_key = key.replace('lin_r.weight', 'graph_pool.lin.weight')
+            
+            # Add other specific key mappings as necessary
+            
+            # Copy modified key-value pair to the new state_dict
+            new_state_dict[new_key] = value
+
+
+        # Handle potential shape mismatch for certain layers
+    
+        try:
+        # Load the modified state_dict into the model
+            self.load_state_dict(new_state_dict, strict=False) 
+        except:
+            for key in new_state_dict.keys():
+                if 'graph_conv.lin.weight' in key:
+                    new_state_dict[key] = new_state_dict[key].transpose(0, 1)
+
+            self.load_state_dict(new_state_dict, strict=False) 
+
+
+
+
+
         
     def set_graph_conv(self, convs):
         self.layers = []
@@ -122,6 +218,7 @@ class GRAPH2VEC(nn.Module):
         self.fc = layer.to(self.config.device)
     
     def embed_graph(self, x, edge_index, batch):
+        # print(x.shape, edge_index.shape)
         attn_weights = dict()
         x = F.one_hot(x, num_classes=self.config.num_feature_dim).float()
         for layer in self.layers:
@@ -141,3 +238,12 @@ class GRAPH2VEC(nn.Module):
 
     def mlp(self, x):
         return self.fc(x)
+    
+    def predict(self, data):
+        self.eval()
+        with torch.no_grad():
+            x, attn = self.embed_graph(data.x.to(self.config.device), data.edge_index.to(self.config.device), data.batch.to(self.config.device))
+            output = self.mlp(x)
+            output_tensor = F.log_softmax(output, dim=1)
+            preds = output_tensor.max(1)[1]
+        return output_tensor, preds

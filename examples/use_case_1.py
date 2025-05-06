@@ -25,7 +25,7 @@ def use_case_1(cfg, hw_design_dir_path, pretrained_model_weight_path, pretrained
 if __name__ == '__main__': 
     cfg = Config(sys.argv[1:])
     
-    hw_design_dir_path = Path("../assets/TJ-RTL-toy/TjFree/det_1011/") # Change this path to other hardware design folder path.
+    hw_design_dir_path = Path("../assets/datasets/TJ-RTL-toy/TjFree/det_1011/") # Change this path to other hardware design folder path.
     pretrained_model_weight_path = "../assets/pretrained_DFG_TJ_RTL/model.pth" # Change this path to your desired pretrained model weight path.
     pretrained_model_cfg_path = "../assets/pretrained_DFG_TJ_RTL/model.cfg" # Change this path to your desired pretrained model config path.
     cfg.graph_type = "DFG" # each pretrained model is bundled with one graph type so you will need to change this to fit the used pretrained model.
@@ -34,5 +34,11 @@ if __name__ == '__main__':
                            pretrained_model_weight_path,\
                            pretrained_model_cfg_path)
     
+    graph_path = "../hardware_graph.pkl"
+    with open(graph_path, "wb") as f:
+      pickle.dump(graph_emb, f)
+
+    print(f"Graph saved to {graph_path}")
     print(graph_emb)
+
     # NOTE: Embedding is a vector of features, do any inspection on embedding for your own usage.
